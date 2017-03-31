@@ -49,11 +49,13 @@
 #include <rviz/properties/color_property.h>
 #include <moveit/trajectory_processing/trajectory_tools.h>
 #include <rviz/robot/robot_link.h>
+#include <rviz/display_context.h>
+#include <rviz/window_manager_interface.h>
 
 namespace moveit_rviz_plugin
 {
 TrajectoryVisualization::TrajectoryVisualization(rviz::Property* widget, rviz::Display* display)
-  : display_(display), widget_(widget), animating_path_(false), current_state_(-1)
+  : display_(display), widget_(widget), animating_path_(false), current_state_(-1), trajectory_slider_panel_(NULL), trajectory_slider_dock_panel_(NULL)
 {
   trajectory_topic_property_ =
       new rviz::RosTopicProperty("Trajectory Topic", "/move_group/display_planned_path",
@@ -101,6 +103,9 @@ TrajectoryVisualization::TrajectoryVisualization(rviz::Property* widget, rviz::D
 
   enable_robot_color_property_ = new rviz::BoolProperty(
       "Color Enabled", false, "Specifies whether robot coloring is enabled", widget, SLOT(enabledRobotColor()), this);
+  
+  enable_trajectory_slider_property_ = new rviz::BoolProperty(
+      "Trajectory Slider", false, "Slider to show trajectory way points", widget, SLOT(enabledTrajectorySlider()), this);
 }
 
 TrajectoryVisualization::~TrajectoryVisualization()
@@ -110,6 +115,7 @@ TrajectoryVisualization::~TrajectoryVisualization()
   displaying_trajectory_message_.reset();
 
   display_path_robot_.reset();
+  delete trajectory_slider_dock_panel_;
 }
 
 void TrajectoryVisualization::onInitialize(Ogre::SceneNode* scene_node, rviz::DisplayContext* context,
@@ -125,6 +131,16 @@ void TrajectoryVisualization::onInitialize(Ogre::SceneNode* scene_node, rviz::Di
   display_path_robot_->setVisualVisible(display_path_visual_enabled_property_->getBool());
   display_path_robot_->setCollisionVisible(display_path_collision_enabled_property_->getBool());
   display_path_robot_->setVisible(false);
+
+  rviz::WindowManagerInterface* window_context = context_->getWindowManager();
+  if (window_context)
+  {
+    trajectory_slider_panel_ = new TrajectoryPanel(window_context->getParentWindow());
+    trajectory_slider_dock_panel_ = window_context->addPane("Trajectory Slider", trajectory_slider_panel_);
+    connect(trajectory_slider_dock_panel_, SIGNAL(visibilityChanged(bool)), this, SLOT(trajectorySliderPanelVisibilityChange(bool)));
+    trajectory_slider_panel_->onInitialize(display_path_robot_, loop_display_property_);
+  }
+  paused_loop_ = false;
 }
 
 void TrajectoryVisualization::onRobotModelLoaded(robot_model::RobotModelConstPtr robot_model)
@@ -145,6 +161,7 @@ void TrajectoryVisualization::onRobotModelLoaded(robot_model::RobotModelConstPtr
   // Load rviz robot
   display_path_robot_->load(*robot_model_->getURDF());
   enabledRobotColor();  // force-refresh to account for saved display configuration
+
 }
 
 void TrajectoryVisualization::reset()
@@ -175,6 +192,11 @@ void TrajectoryVisualization::clearTrajectoryTrail()
 void TrajectoryVisualization::changedLoopDisplay()
 {
   display_path_robot_->setVisible(display_->isEnabled() && displaying_trajectory_message_ && animating_path_);
+  if (loop_display_property_->getBool())
+   trajectory_slider_panel_->checkButton(false);
+  else
+   trajectory_slider_panel_->checkButton(true);
+   //paused_loop_ = false;
 }
 
 void TrajectoryVisualization::changedShowTrail()
@@ -326,6 +348,7 @@ void TrajectoryVisualization::update(float wall_dt, float ros_dt)
 
     if (animating_path_)
     {
+      trajectory_slider_panel_->setSliderPosition(0);
       current_state_ = -1;
       current_state_time_ = std::numeric_limits<float>::infinity();
       display_path_robot_->update(displaying_trajectory_message_->getFirstWayPointPtr());
@@ -340,9 +363,13 @@ void TrajectoryVisualization::update(float wall_dt, float ros_dt)
       tm = displaying_trajectory_message_->getWayPointDurationFromPrevious(current_state_ + 1);
     if (current_state_time_ > tm)
     {
-      ++current_state_;
+      if (!enable_trajectory_slider_property_->getBool() || loop_display_property_->getBool())
+        ++current_state_;
+      else
+        current_state_ = trajectory_slider_panel_->getSliderPosition();
       if ((std::size_t)current_state_ < displaying_trajectory_message_->getWayPointCount())
       {
+        trajectory_slider_panel_->setSliderPosition(current_state_);
         display_path_robot_->update(displaying_trajectory_message_->getWayPointPtr(current_state_));
         for (std::size_t i = 0; i < trajectory_trail_.size(); ++i)
           trajectory_trail_[i]->setVisible(i <= current_state_);
@@ -392,6 +419,7 @@ void TrajectoryVisualization::incomingDisplayTrajectory(const moveit_msgs::Displ
   {
     boost::mutex::scoped_lock lock(update_trajectory_message_);
     trajectory_message_to_display_.swap(t);
+    trajectory_slider_panel_->update(trajectory_message_to_display_);
     if (interrupt_display_property_->getBool())
       interruptCurrentDisplay();
   }
@@ -425,6 +453,22 @@ void TrajectoryVisualization::setRobotColor(rviz::Robot* robot, const QColor& co
   const LinksMap& links = robot->getLinks();
   for (LinksMap::const_iterator it = links.begin(); it != links.end(); it++)
     it->second->setColor(color.redF(), color.greenF(), color.blueF());
+}
+
+void TrajectoryVisualization::enabledTrajectorySlider()
+{
+  if (enable_trajectory_slider_property_->getBool())
+    trajectorySliderPanelVisibilityChange(true);
+  else
+    trajectorySliderPanelVisibilityChange(false);
+}
+
+void TrajectoryVisualization::trajectorySliderPanelVisibilityChange(bool enable)
+{
+  if (enable)
+    trajectory_slider_panel_->onEnable();
+  else
+    trajectory_slider_panel_->onDisable();
 }
 
 }  // namespace moveit_rviz_plugin

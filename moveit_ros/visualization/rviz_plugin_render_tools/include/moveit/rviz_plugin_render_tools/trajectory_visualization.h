@@ -39,7 +39,9 @@
 
 #include <moveit/macros/class_forward.h>
 #include <rviz/display.h>
+#include <rviz/panel_dock_widget.h>
 #include <moveit/rviz_plugin_render_tools/robot_state_visualization.h>
+#include <moveit/rviz_plugin_render_tools/trajectory_panel.h>
 #include <ros/ros.h>
 #include <moveit/robot_model/robot_model.h>
 #include <moveit/robot_state/robot_state.h>
@@ -104,6 +106,8 @@ private Q_SLOTS:
   void changedStateDisplayTime();
   void changedRobotColor();
   void enabledRobotColor();
+  void enabledTrajectorySlider();
+  void trajectorySliderPanelVisibilityChange(bool enable);
 
 protected:
   /**
@@ -128,6 +132,7 @@ protected:
   int current_state_;
   float current_state_time_;
   boost::mutex update_trajectory_message_;
+  bool paused_loop_;
 
   robot_model::RobotModelConstPtr robot_model_;
   robot_state::RobotStatePtr robot_state_;
@@ -138,6 +143,8 @@ protected:
   Ogre::SceneNode* scene_node_;
   rviz::DisplayContext* context_;
   ros::NodeHandle update_nh_;
+  TrajectoryPanel* trajectory_slider_panel_;
+  rviz::PanelDockWidget* trajectory_slider_dock_panel_;
 
   // Properties
   rviz::BoolProperty* display_path_visual_enabled_property_;
@@ -150,6 +157,7 @@ protected:
   rviz::BoolProperty* interrupt_display_property_;
   rviz::ColorProperty* robot_color_property_;
   rviz::BoolProperty* enable_robot_color_property_;
+  rviz::BoolProperty* enable_trajectory_slider_property_;
 };
 
 }  // namespace moveit_rviz_plugin
